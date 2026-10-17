@@ -1,5 +1,5 @@
 from falkordb import FalkorDB
-from app.config import settings
+from config import settings
 
 class FalkorClient:
     def __init__(self):
