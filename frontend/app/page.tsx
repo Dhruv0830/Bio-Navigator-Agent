@@ -93,7 +93,7 @@ export default function Home() {
     const sessionId = getOrCreateSessionId();
 
     try {
-      const response = await fetch("http://localhost:8000/v1/navigate/stream", {
+      const response = await fetch("/api/query", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
