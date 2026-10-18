@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import GermCursor from "@/components/GermCursor";
 
 export const metadata: Metadata = {
   title: "Bio-Pathway Navigator",
@@ -14,7 +15,8 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className="bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500 selection:text-white flex h-screen overflow-hidden">
+      <body className="bg-black text-white antialiased selection:bg-white selection:text-black flex h-screen overflow-hidden">
+        <GermCursor />
         {children}
       </body>
     </html>

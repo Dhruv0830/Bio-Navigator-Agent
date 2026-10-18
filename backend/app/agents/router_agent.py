@@ -11,7 +11,7 @@ def router_node(state: AgentState) -> AgentState:
 
     client = OpenAI(
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        api_key=os.getenv("GEMINI_API_KEY", "dummy_key")
+        api_key=os.getenv("GEMINI_API_KEY")
     )
 
     prompt = f"""
@@ -24,7 +24,7 @@ def router_node(state: AgentState) -> AgentState:
 
     try:
         response = client.chat.completions.create(
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
         )
@@ -35,7 +35,7 @@ def router_node(state: AgentState) -> AgentState:
         state["extracted_entities"] = parsed.get("entities", [])
         thoughts.append(f"Router Agent: Identified intent '{state['intent']}' with entities {state['extracted_entities']}")
     except Exception as e:
-        thoughts.append(f"Router Agent Warning: Falling back to hybrid search due to LLM error: {e}")
+        thoughts.append(f"Router Agent Warning: Falling back to default traversal due to LLM error: {e}")
         state["intent"] = "pathway_traversal"
         state["extracted_entities"] = [{"type": "Keyword", "name": query}]
 

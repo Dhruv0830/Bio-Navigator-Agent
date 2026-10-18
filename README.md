@@ -1,62 +1,101 @@
-bio-pathway-navigator/
-├── README.md # Professional architectural overview & cloud setup guide
-├── backend/ # FastAPI Python Backend
-│ ├── Dockerfile # For cloud deployment (Render, Railway, Fly.io)
-│ ├── requirements.txt # fastapi, uvicorn, redis, falkordb, langgraph, openai, etc.
-│ ├── .env.example # Template for FalkorDB Cloud & Upstash credentials
-│ ├── .env # Active cloud configuration keys (Ignored in git)
-│ └── app/
-│ ├── main.py # FastAPI entrypoint, session middleware, & routes
-│ ├── config.py # Centralized configuration loader for cloud hosts
-│ ├── database/
-│ │ ├── falkor_client.py # FalkorDB Cloud connection & query executor
-│ │ └── seed_data.py # Remote script to seed biomedical nodes/edges into FalkorDB Cloud
-│ ├── search/
-│ │ ├── hybrid_search.py # BM25 sparse search + Dense vector scoring (RRF)
-│ │ └── semantic_cache.py # Upstash Redis semantic caching layer
-│ ├── agents/
-│ │ ├── state.py # LangGraph state schema (PathwayState)
-│ │ ├── router_agent.py # Intent parsing & query routing
-│ │ ├── traversal_agent.py # Multi-hop Cypher tool execution agent
-│ │ └── critic_agent.py # Pharmacological safety & validation critic
-│ └── middleware/
-│ ├── rate_limiter.py # Upstash Redis token bucket rate limiter (per session UUID)
-│ └── telemetry.py # Prometheus metrics exporter
-└── frontend/ # Next.js 14/15 Frontend
-├── package.json
-├── tailwind.config.js
-└── src/
-├── app/
-│ ├── page.tsx # Main dashboard (Chat panel + Graph visualizer)
-│ └── layout.tsx # Root layout with session UUID provider
-├── utils/
-│ └── session.ts # Client-side localStorage UUID generator & header injector
-└── components/
-├── GraphViewer.tsx # Interactive visual graph rendering component
-├── ChatPanel.tsx # Live chat stream & agent thought logs
-└── MetricsCard.tsx # Real-time latency & cache hit status indicators
+# Bio-Pathway Navigator 🧬🕸️
 
-[ Next.js Frontend ]
-│ (Sends POST with JSON payload + 'X-Session-ID' header)
-▼
-[ FastAPI Gateway ]
-│
-├─► 1. Rate Limiter Middleware (Upstash Redis)
-│ └─► Checks session token bucket. Rejects if >30 req/min.
-│
-├─► 2. Semantic Cache Lookup (Upstash Redis)
-│ └─► Checks if vector similarity >= 0.95.
-│ (If HIT ⚡: Returns cached graph data instantly, bypassing agents!)
-│
-└─► 3. LangGraph Multi-Agent Pipeline (Cache MISS)
-├─► Router Agent: Parses intent & extracts entities
-├─► Hybrid Search: BM25 sparse + Dense vectors (RRF) ──► FalkorDB Cloud (Finds Seed Nodes)
-├─► Traversal Agent: Executes multi-hop Cypher queries ──► FalkorDB Cloud (Traverses Graph)
-└─► Critic Agent: Validates medical relevance & filters hallucinations (Gemini API)
-│
-[ Storage & Persistence ]
-└─► Saves result to Upstash Semantic Cache & appends query to Session Episodic Memory (`session_id`)
-│
-[ Response Delivery ]
-└─► Returns structured JSON (Seed nodes, Subgraph edges, Agent thoughts, Synthesized answer)
-└─► [ Frontend Renders Chat + Interactive Graph ]
+_Built for Graph Hacks 2026 | Track: Agents That Act on Connected Data_
+
+Bio-Pathway Navigator is a real-time biomedical knowledge graph assistant that connects **FalkorDB Cloud**, **FastAPI** and a **Redis** semantic cache. Powered by a multi-agent LangGraph workflow and hybrid search (BM25 + Dense Embeddings + RRF + Gemini cross-encoder reranking), it enables researchers to explore complex disease interactions, protein pathways, and drug targets in minutes and saves hours if not days of research work.
+
+---
+
+## 🚀 Live Demo & Video
+
+- **Demo Video:** [Watch the 2-Minute Demo on YouTube](#) _(Insert your YouTube link here)_
+- **Live Deployment:** [Access the Live App](#) _(Insert live link or refer to local instructions below)_
+
+---
+
+## 🏗️ Architecture & Tech Stack
+
+- **Graph Database:** FalkorDB Cloud (Hosting an expanded 150k multi-domain biomedical subset derived from Harvard Dataverse PrimeKG).
+- **Caching & Rate Limiting:** Upstash Redis (Semantic Vector Caching using `gemini-embedding-2` and sliding-window rate limiters).
+- **Backend Orchestration:** FastAPI, LangGraph Multi-Agent Workflow (`Router` -> `Traversal` -> `Critic`), Google GenAI SDK (`gemini-3.8-flash`).
+- **Frontend & Visualization:** Next.js (App Router), Tailwind CSS v4, `react-force-graph-3d`, Three.js sprite text rendering.
+
+---
+
+## 🗺️ Graph Data Model
+
+Our knowledge graph models biomedical entities and their mechanistic interactions:
+
+    ┌───────────────┐          interacts_with          ┌───────────────┐
+    │  gene/protein │ ───────────────────────────────> │    disease    │
+    │  (e.g., EGFR) │                                  │ (e.g., Cancer)│
+    └───────────────┘                                  └───────────────┘
+            │                                                  ▲
+            │ participating_in                                 │ targeted_by
+            ▼                                                  │
+    ┌───────────────┐                                  ┌───────────────┐
+    │    pathway    │ ───────────────────────────────> │  compound /   │
+    │ (R-HSA-...)   │          modulates               │  drug target  │
+    └───────────────┘                                  └───────────────┘
+
+- **Nodes:** Labeled as `Entity` with properties: `id`, `name`, and `type` (`gene/protein`, `disease`, `pathway`, `compound`).
+- **Relationships:** Directed edges representing biological associations (`interacts_with`, `participating_in`, `modulates`).
+
+---
+
+## ⚙️ Cypher Queries & Graph Algorithms
+
+FalkorDB is central to our retrieval pipeline. Our traversal agent executes multi-hop Cypher traversal queries to discover paths between anchor nodes and surrounding disease/protein phenotypes:
+
+### 1. Multi-Hop Path Traversal Cypher Query
+
+```cypher
+MATCH path = (n:Entity {name: $anchor_node})-[r:interacts_with*1..2]-(m:Entity)
+RETURN path
+LIMIT 25
+```
+
+### 2. Hybrid Anchor Search Cypher Query
+
+```cypher
+MATCH (n:Entity)
+WHERE toLower(n.name) CONTAINS toLower($search_term)
+RETURN n.id AS id, n.name AS name, n.type AS type
+LIMIT 10
+```
+
+---
+
+## 🛠️ Local Setup & Installation
+
+### Prerequisites
+
+- Python 3.10+
+- Node.js 18+
+- FalkorDB Cloud Instance & Upstash Redis Database
+
+### 1. Backend Setup
+
+```bash
+cd backend
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+
+# Configure Environment Variables in .env using .env.example as reference
+# FALCORDB_URL=redis://...
+# REDIS_URL=redis://...
+# GEMINI_API_KEY=your_api_key
+
+python main.py
+```
+
+### 2. Frontend Setup
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) in your browser.

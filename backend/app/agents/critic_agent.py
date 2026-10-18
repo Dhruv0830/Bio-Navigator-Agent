@@ -12,7 +12,7 @@ def critic_node(state: AgentState) -> AgentState:
 
     client = OpenAI(
         base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        api_key=os.getenv("GEMINI_API_KEY", "dummy_key")
+        api_key=os.getenv("GEMINI_API_KEY")
     )
 
     prompt = f"""
@@ -25,7 +25,7 @@ def critic_node(state: AgentState) -> AgentState:
 
     try:
         response = client.chat.completions.create(
-            model="gemini-2.5-flash",
+            model="gemini-3.8-flash",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.2
         )

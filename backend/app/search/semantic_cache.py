@@ -1,85 +1,101 @@
-import redis
+import os
+import hashlib
 import json
 import numpy as np
-from app.config import settings
-from openai import OpenAI
+import redis
+from typing import Optional, Dict, Any
+from google import genai
+from google.genai import types
 
-class SemanticCache:
-    def __init__(self, similarity_threshold: float = 0.92):
-        self.redis_client = redis.Redis.from_url(settings.REDIS_URL)
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
+redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=False)
+
+def cosine_similarity(a: list, b: list) -> float:
+    a_arr, b_arr = np.array(a), np.array(b)
+    return float(np.dot(a_arr, b_arr) / (np.linalg.norm(a_arr) * np.linalg.norm(b_arr)))
+
+class RedisGeminiSemanticCache:
+    def __init__(self, similarity_threshold: float = 0.92, ttl_seconds: int = 86400):
         self.threshold = similarity_threshold
-        self.client = OpenAI(
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-            api_key=settings.FALKORDB_URL.split(":")[-1]
-        )
-
-    def _get_embedding(self, text: str) -> list[float]:
-        """Generates embedding vector for cache comparison."""
-        try:
-            response = self.client.embeddings.create(
-                model="text-embedding-004",
-                input=text
-            )
-            return response.data[0].embedding
-        except Exception:
-            return []
-
-    def _cosine_similarity(self, vec_a: list[float], vec_b: list[float]) -> float:
-        """Computes cosine similarity between two float vectors."""
-        a = np.array(vec_a)
-        b = np.array(vec_b)
-        norm_a = np.linalg.norm(a)
-        norm_b = np.linalg.norm(b)
-        if norm_a == 0 or norm_b == 0:
-            return 0.0
-        return float(np.dot(a, b) / (norm_a * norm_b))
-
-    def get(self, query: str) -> dict | None:
-        """Checks Upstash Redis cache for semantically matching prior queries."""
-        query_embedding = self._get_embedding(query)
-        if not query_embedding:
-            return None
-
-        # Scan cached keys in Upstash Redis
-        cache_keys = self.redis_client.keys("sem_cache:*")
-        for key in cache_keys:
-            cached_data = self.redis_client.hgetall(key)
-            if not cached_data:
-                continue
+        self.ttl = ttl_seconds
+        
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise ValueError("GEMINI_API_KEY environment variable is missing.")
             
-            cached_embedding = json.loads(cached_data.get(b"embedding", b"[]"))
-            if not cached_embedding:
-                continue
+        self.client = genai.Client(api_key=api_key)
+        self.embedding_model = "gemini-embedding-2"
 
-            similarity = self._cosine_similarity(query_embedding, cached_embedding)
-            if similarity >= self.threshold:
-                print(f"Semantic Cache HIT ⚡ (Similarity: {similarity:.4f})")
-                return json.loads(cached_data.get(b"response", b"{}"))
+    def _get_embedding(self, text: str) -> list:
+        try:
+            response = self.client.models.embed_content(
+                model=self.embedding_model,
+                contents=text,
+                config=types.EmbedContentConfig(output_dimensionality=768)
+            )
+            # Safe attribute retrieval for google-genai SDK response
+            if hasattr(response, 'embeddings') and response.embeddings:
+                return response.embeddings[0].values
+            elif hasattr(response, 'embedding'):
+                return response.embedding
+            elif isinstance(response, dict) and 'embedding' in response:
+                return response['embedding']
+            return [0.0] * 768
+        except Exception as e:
+            print(f"Embedding Generation Warning: {e}")
+            return [0.0] * 768
 
+    def get(self, query_text: str) -> Optional[Dict[str, Any]]:
+        try:
+            query_vector = self._get_embedding(query_text)
+            cache_keys = redis_client.keys(b"cache:*")
+            
+            best_match = None
+            highest_similarity = -1.0
+            
+            for key in cache_keys:
+                raw_data = redis_client.get(key)
+                if not raw_data:
+                    continue
+                
+                entry = json.loads(raw_data.decode('utf-8'))
+                cached_vector = entry.get("embedding")
+                
+                if cached_vector:
+                    sim = cosine_similarity(query_vector, cached_vector)
+                    if sim > highest_similarity:
+                        highest_similarity = sim
+                        best_match = entry["response"]
+            
+            if highest_similarity >= self.threshold and best_match:
+                return {
+                    "response": best_match,
+                    "similarity": round(highest_similarity, 4),
+                    "cached": True
+                }
+        except Exception as e:
+            print(f"Redis Semantic Cache GET Warning: {e}")
+            
         return None
 
-    def set(self, query: str, response_data: dict):
-        """Stores query embedding and response in Upstash Redis with a 24-hour TTL."""
-        query_embedding = self._get_embedding(query)
-        if not query_embedding:
-            return
-
-        cache_id = abs(hash(query))
-        cache_key = f"sem_cache:{cache_id}"
-
-        mapping = {
-            "query": query,
-            "embedding": json.dumps(query_embedding),
-            "response": json.dumps(response_data)
-        }
-
+    def set(self, query_text: str, response_data: Any):
         try:
-            pipe = self.redis_client.pipeline()
-            pipe.hset(cache_key, mapping=mapping)
-            pipe.expire(cache_key, 86400) # Expire in 24 hours
-            pipe.execute()
-        except redis.RedisError as e:
-            print(f"Redis Cache Write Warning: {e}")
+            query_vector = self._get_embedding(query_text)
+            query_hash = hashlib.sha256(query_text.encode()).hexdigest()
+            cache_key = f"cache:{query_hash}"
+            
+            payload = {
+                "query": query_text,
+                "embedding": query_vector,
+                "response": response_data
+            }
+            
+            redis_client.setex(
+                name=cache_key,
+                time=self.ttl,
+                value=json.dumps(payload)
+            )
+        except Exception as e:
+            print(f"Redis Semantic Cache SET Warning: {e}")
 
-# Global semantic cache instance
-semantic_cache = SemanticCache()
+semantic_cache = RedisGeminiSemanticCache(similarity_threshold=0.92, ttl_seconds=86400)

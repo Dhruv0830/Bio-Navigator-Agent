@@ -7,7 +7,7 @@ interface LogoIconProps {
 }
 
 export default function LogoIcon({
-  className = "text-[#00E599]",
+  className = "text-white",
   size = 24,
 }: LogoIconProps) {
   return (
@@ -19,18 +19,13 @@ export default function LogoIcon({
       className={className}
       xmlns="http://www.w3.org/2000/svg"
     >
-      {/* Outer Nodes & Connecting Edges */}
       <circle cx="256" cy="70" r="32" />
       <circle cx="415" cy="162" r="32" />
       <circle cx="415" cy="350" r="32" />
       <circle cx="256" cy="442" r="32" />
       <circle cx="97" cy="350" r="32" />
       <circle cx="97" cy="162" r="32" />
-
-      {/* Central Node */}
       <circle cx="256" cy="256" r="48" />
-
-      {/* Edges */}
       <line
         x1="256"
         y1="70"

@@ -3,7 +3,7 @@ from typing import Optional, Annotated
 import redis
 import time
 import uuid
-from app.config import settings
+from config import settings
 
 # Initialize Upstash Redis client
 redis_client = redis.Redis.from_url(settings.REDIS_URL)

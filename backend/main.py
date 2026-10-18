@@ -2,23 +2,29 @@ import time
 import json
 from typing import Optional, Annotated, List
 from fastapi import FastAPI, Header, HTTPException
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
+
+load_dotenv()
+
+# Fixed import paths based on your project structure
 from app.database.seed_data import check_and_seed_database
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # --- Startup Event ---
-    check_and_seed_database()
-    yield
-    # --- Shutdown Event (if any cleanup is needed) ---
-
-# Internal App Modules
 from app.middleware.rate_limiter import check_rate_limit, redis_client
 from app.search.semantic_cache import semantic_cache
 from app.agents.graph_workflow import compiled_workflow
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- Startup Event: Automatically checks graph and seeds 150k subset if empty ---
+    try:
+        check_and_seed_database()
+    except Exception as e:
+        print(f"Startup Seeding Warning: {e}")
+    yield
+    # --- Shutdown Event (if any cleanup is needed) ---
 
 app = FastAPI(
     title="Bio-Pathway Navigator API",
@@ -71,11 +77,11 @@ async def navigate_stream(
     """
     Unified SSE streaming endpoint:
     1. Enforces rate limiting per session UUID.
-    2. Checks Upstash Redis Semantic Cache (streams instantly if hit).
+    2. Checks Redis Semantic Cache (streams instantly if hit).
     3. Executes LangGraph multi-agent workflow over FalkorDB Cloud on cache miss.
     4. Persists results to semantic cache and updates Redis session history.
     """
-    # 1. Rate Limiting Check
+    # 1. Rate Limiting Check (Sliding Window ZSET)
     session_id = check_rate_limit(x_session_id)
     
     query = payload.query.strip()
@@ -83,13 +89,17 @@ async def navigate_stream(
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
     async def event_generator():
-        # 2. Semantic Cache Check
+        # 2. Semantic Cache Check (Gemini Embeddings + Vector/Cosine Matching)
         cached_result = semantic_cache.get(query)
         if cached_result:
-            cached_result["session_id"] = session_id
-            cached_result["cached"] = True
-            # Stream the cached result immediately as an SSE event
-            yield f"data: {json.dumps(cached_result)}\n\n"
+            # Extract the inner response dictionary and flatten it to match frontend root keys
+            response_payload = cached_result.get("response", {})
+            response_payload["session_id"] = session_id
+            response_payload["cached"] = True
+            response_payload["node"] = "complete"
+            
+            # Stream the flattened payload directly
+            yield f"data: {json.dumps(response_payload)}\n\n"
             yield f"data: {json.dumps({'status': 'complete'})}\n\n"
             return
 
