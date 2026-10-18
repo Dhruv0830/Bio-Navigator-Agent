@@ -8,8 +8,8 @@ Bio-Pathway Navigator is a real-time biomedical knowledge graph assistant that c
 
 ## 🚀 Live Demo & Video
 
-- **Demo Video:** [Watch the 2-Minute Demo on YouTube](#) _(Insert your YouTube link here)_
-- **Live Deployment:** [Access the Live App](#) _(Insert live link or refer to local instructions below)_
+- **Demo Video:** [Watch the 2-Minute Demo on YouTube](https://www.youtube.com/watch?v=aUK457IbbY4)
+- **Live Deployment:** [Access the Live App](https://bionavigator-seven.vercel.app/)
 
 ---
 
@@ -45,9 +45,22 @@ Our knowledge graph models biomedical entities and their mechanistic interaction
 
 ## ⚙️ Cypher Queries & Graph Algorithms
 
-FalkorDB is central to our retrieval pipeline. Our traversal agent executes multi-hop Cypher traversal queries to discover paths between anchor nodes and surrounding disease/protein phenotypes:
+FalkorDB is central to our retrieval pipeline. Powered by **GraphBLAS sparse-matrix linear algebra** under the hood, it replaces traditional pointer-chasing with ultra-fast matrix multiplications. Our multi-agent pipeline leverages both standard OpenCypher traversal patterns and FalkorDB’s native graph algorithm procedures (`CALL algo.*`).
 
-### 1. Multi-Hop Path Traversal Cypher Query
+### 1. Hybrid Entity Anchor Search (Router / Traversal Agent)
+
+Used to discover starting seed nodes (genes, proteins, diseases, or compounds) within the 150k PrimeKG graph subset based on extracted user entities.
+
+```cypher
+MATCH (n:Entity)
+WHERE toLower(n.name) CONTAINS toLower($search_term)
+RETURN n.id AS id, n.name AS name, n.type AS type
+LIMIT 10
+```
+
+### 2. Multi-Hop Path Traversal Query (Graph Traversal Agent)
+
+Traverses outbound and inbound relationships up to 2 hops deep starting from the identified anchor nodes to extract biological interaction chains and pathways.
 
 ```cypher
 MATCH path = (n:Entity {name: $anchor_node})-[r:interacts_with*1..2]-(m:Entity)
@@ -55,13 +68,16 @@ RETURN path
 LIMIT 25
 ```
 
-### 2. Hybrid Anchor Search Cypher Query
+### 3. Subgraph Entity & Property Expansion Query
+
+Fetches node labels, properties, and relationship types for the retrieved subgraphs to stream clean JSON payloads directly to the 3D Force Graph viewer.
 
 ```cypher
 MATCH (n:Entity)
-WHERE toLower(n.name) CONTAINS toLower($search_term)
-RETURN n.id AS id, n.name AS name, n.type AS type
-LIMIT 10
+WHERE n.name IN $entity_names
+OPTIONAL MATCH (n)-[r]-(m:Entity)
+RETURN n, r, m
+LIMIT 50
 ```
 
 ---
